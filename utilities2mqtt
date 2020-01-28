@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+
+import subprocess
+import json
+import paho.mqtt.publish as publish
+import settings
+import time
+
+def send_mqtt(topic, payload):
+    print("Storing '{0}' on topic '{1}'".format(payload, topic))
+    try:
+        publish.single(topic, payload=payload, qos=1, hostname=settings.MQTT_HOST, port=settings.MQTT_PORT, auth=None)
+    except Exception as ex:
+        print("MQTT Publish Failed: " + str(ex))
+
+
+# start the rtl_tcp program
+rtltcp = subprocess.Popen([settings.RTL_TCP + " > /dev/null 2>&1 &"], shell=True,
+    stdin=None, stdout=None, stderr=None, close_fds=True)
+time.sleep(5)
+rtlamr = subprocess.Popen([settings.RTLAMR,
+                           "-format=json",
+                           "msgtype=scm,r900",
+                           "-unique=true"],
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+
+while True:
+    amrline = rtlamr.stdout.readline().strip().decode()
+    amrjson = json.loads(amrline)
+    
+    dev_id = amrjson['Message']['ID']
+    if dev_id not in settings.WATCHED_METERS:
+        continue
+    payload = {}
+    payload['consumption'] = str(amrjson['Message']['Consumption'])
+    payload['timestamp'] = amrjson['Time']
+    
+    print('readings/{0}/meter_reading'.format(str(dev_id)))
+    print(json.dumps(payload))
+
+ 
+    send_mqtt('readings/{0}/meter_reading'.format(str(dev_id)),
+              json.dumps(payload))
